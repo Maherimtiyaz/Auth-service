@@ -1,6 +1,15 @@
 from fastapi import FastAPI
+from app.database import engine, Base
+from app.routes import auth_routes
+from app import models
 
 app = FastAPI()
+
+# CREATE TABLES AFTER MODELS ARE LOADED 
+
+Base.metadata.create_all(bind=engine)
+
+
 
 @app.get("/")
 async def reas_root():
