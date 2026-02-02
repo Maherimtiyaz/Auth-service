@@ -9,6 +9,8 @@ app = FastAPI()
 
 Base.metadata.create_all(bind=engine)
 
+#Connection auth routes
+app.include_router(auth_routes.router)
 
 
 @app.get("/")
