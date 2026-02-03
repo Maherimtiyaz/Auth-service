@@ -24,8 +24,11 @@ def register_user(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Email already registered")
     
     # Hash Password
-
-    hashed_pw = hash_password(user_in.password)
+    
+    try:
+        hashed_pw = hash_password(user_in.password)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Password hashing error: {str(e)}")
 
     # Create User model instance
 
@@ -35,10 +38,14 @@ def register_user(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
     )
 
     # Save to DB
-
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user) # reload from DB to get ID & timestamps
+    
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user) # reload from DB to get ID & timestamps
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
     # Return safe response
 
