@@ -13,3 +13,15 @@ class UserResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+# Login request
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+# Login Response
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"

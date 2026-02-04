@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app import models, schemas
+from app import models, schemas, auth
 from app.database import get_db
-from app.auth import hash_password
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+router = APIRouter(
+    prefix="/auth", 
+    tags=["auth"]
+)
 
 @router.post("/register", response_model=schemas.UserResponse)
 def register_user(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
@@ -26,7 +30,7 @@ def register_user(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
     # Hash Password
     
     try:
-        hashed_pw = hash_password(user_in.password)
+        hashed_pw = auth.hash_password(user_in.password)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Password hashing error: {str(e)}")
 
@@ -51,3 +55,33 @@ def register_user(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
 
     return new_user
 
+# 
+@router.post("/login", response_model=schemas.TokenResponse)
+def login_user(login_request: schemas.LoginRequest, db: Session = Depends(get_db)):
+    # Fetch user by email 
+    user = (
+        db.query(models.User)
+        .filter(models.User.email == login_request.email)
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        )
+
+    # Verify password
+
+    if not auth.verify_password(login_request.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password"
+        
+        )
+    
+    # Create access token
+
+    access_token = auth.create_access_token(data={"sub": user.email})
+
+    return {"access_token": access_token, "token_type": "bearer"}

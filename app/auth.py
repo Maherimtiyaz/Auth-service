@@ -1,5 +1,17 @@
 from passlib.context import CryptContext
+from datetime import datetime, timedelta
+from jose import jwt
+from dotenv import load_dotenv
 import hashlib
+import os
+
+
+
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+
 
 # Password hashing context (bycrypt recommended)
 
@@ -7,31 +19,25 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
-    if not password:
-        raise ValueError("Password cannot be empty")
-    
-    # Strip leading/trailing whitespace (Postman sometimes adds)
     password = password.strip()
-    
-    # Convert to bytes
-    password_bytes = password.encode("utf-8")
-    
-    # Truncate to 72 bytes for bcrypt
-    if len(password_bytes) > 72:
-        password_bytes = password_bytes[:72]
-    
-    # Hash using bcrypt
-    return pwd_context.hash(password_bytes)
+    return pwd_context.hash(password)
 
-
-def hash_password(password: str) -> str:
-    password = password.strip()
-    sha_pw = hashlib.sha256(password.encode("utf-8")).digest()
-    return pwd_context.hash(sha_pw)
-
+# Verify password
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """
-    Verify a plaintext password against a hashed password
-    """
-    return pwd_context.verify(plain_password, hashed_password)
+   
+    return pwd_context.verify(plain_password.strip(), hashed_password)
+
+# Create Access Token
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None):
+    to_encode = data.copy()
+
+    expire = datetime.utcnow() + (
+        expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    to_encode.update({"exp": expire})
+
+
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
