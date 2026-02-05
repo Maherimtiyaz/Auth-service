@@ -5,7 +5,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app import models
-from jose import jwt, JWTError
+from jose import jwt, JWTError, ExpiredSignatureError
 from dotenv import load_dotenv
 import hashlib
 import os
@@ -17,14 +17,15 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # oAuth2 Bearer Scheme
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-
 # Password hashing context (bycrypt recommended)
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+# Access token
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+
+# Hash password
 
 def hash_password(password: str) -> str:
     password = password.strip()
@@ -38,13 +39,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 # Create Access Token
 
-def create_access_token(data: dict, expires_delta: timedelta | None = None):
+def create_access_token(data: dict, expires_delta: timedelta, sub: str | None = None):
     to_encode = data.copy()
 
-    expire = datetime.utcnow() + (
-        expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    to_encode.update({"exp": expire})
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
+    expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"sub": sub, "exp": expire})
 
 
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
@@ -67,6 +68,13 @@ def get_current_user(
         email: str | None = payload.get("sub")
         if email is None:
             raise credentials_exception
+    except ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail = "Token has expired",
+            headers = {"WW-Authenticate": "Bearer"},
+        )
+    
     except JWTError:
         raise credentials_exception
     
@@ -76,7 +84,7 @@ def get_current_user(
     
     return user
 
-# 
+# role checking
 
 def require_role(required_role: str):
     def role_checker(current_user: models.User = Depends(get_current_user)):
