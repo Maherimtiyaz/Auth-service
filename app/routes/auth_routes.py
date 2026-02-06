@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.orm import Session
 from app import models, schemas, auth
 from app.database import get_db
+from app.models import User
 
 
 
@@ -55,25 +56,60 @@ def register_user(user_in: schemas.UserCreate, db: Session = Depends(get_db)):
 
     return new_user
 
-# 
+# Login endpoint
+
 @router.post("/login", response_model=schemas.TokenResponse)
-def login_user(login_request: schemas.LoginRequest, db: Session = Depends(get_db)):
+def login_user(
+    login_data: schemas.LoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    
     # Fetch user by email 
     user = (
         db.query(models.User)
-        .filter(models.User.email == login_request.email)
+        .filter(models.User.email == login_data.email)
         .first()
     )
 
-    if not user:
+    if not user or not auth.verify_password(
+        login_data.password, user.password_hash
+    ):
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password"
+            detail="Invalid email or password"
         )
+    
+    # Access token (unchanged)
+    access_token = auth.create_access_token(
+        data={"sub": str(user.id), "role": user.role}
+    )
+
+    # Refresh token (new)
+    raw_refresh_token, refresh_token = auth.create_refresh_token(
+        user_id = user.id
+    )
+
+    db.add(refresh_token)
+    db.commit()
+
+    # Set refresh token as httpOnly cookie
+    response.set_cookie(
+        key="refresh_token",
+        value=raw_refresh_token,
+        httponly=True,
+        secure=False, # True in production (HTTPS)
+        samesite="lax",
+        max_age=auth.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/auth/refresh"
+    )
+
+    return {"access_token": access_token, "token_type": "bearer"}
 
     # Verify password
 
-    if not auth.verify_password(login_request.password, user.password_hash):
+    if not auth.verify_password(login_data.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
@@ -90,3 +126,25 @@ def login_user(login_request: schemas.LoginRequest, db: Session = Depends(get_db
     )
 
     return {"access_token": access_token, "token_type": "bearer"}
+
+# Refresh token endpoint
+
+@router.post("/refresh", response_model=schemas.TokenResponse)
+def refresh_access_token(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    refresh_token = request.cookies.get("refresh_token")
+
+    if not refresh_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing refresh token",
+        )
+    
+    return auth.rotate_refresh_token(
+        refrsh_token=refresh_token,
+        db=db,
+        response=response,
+    )
