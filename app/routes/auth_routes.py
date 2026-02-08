@@ -144,7 +144,23 @@ def refresh_access_token(
         )
     
     return auth.rotate_refresh_token(
-        refrsh_token=refresh_token,
+        raw_refresh_token=refresh_token,
         db=db,
+        response=response,
+    )
+
+# Logout endpoint
+
+@router.post("/logout")
+def logout(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    refresh_token = request.cookies.get("refresh_token")
+
+    return auth.logout_user(
+        db=db,
+        raw_refresh_token=refresh_token,
         response=response,
     )

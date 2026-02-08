@@ -1,6 +1,6 @@
 from passlib.context import CryptContext
 from datetime import datetime, timedelta, timezone
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -151,24 +151,97 @@ def create_refresh_token(user_id: int) -> tuple[str, RefreshToken]:
 
 # Auth refresh access token
 
-def refresh_access_token(db: Session, raw_refresh_token: str):
-    # 1. Hash incoming token
+
+def rotate_refresh_token(
+    db: Session,
+    raw_refresh_token: str,
+    response: Response,
+):
+    # 1. Hash incoming refresh token
     token_hash = hash_refresh_token(raw_refresh_token)
 
     # 2. Lookup token in DB
-    db_token = db.query(RefreshToken).filter_by(token_hash=token_hash, revoked=False)
-    if not db_token or db_token.expires_at < datetime.now(timezone.utc):
-        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
-    
-    # 3. Create new access token
-    access_token = create_access_token(
-        data={"sub": str(db_token.user_id), "role": db_token.user.role},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    db_token = (
+        db.query(RefreshToken)
+        .filter(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.revoked == False,
+        )
+        .first()
     )
 
-    # 4. Rotate refresh token
-    new_raw_token, new_db_token = create_refresh_token(db, user_id=db_token.user_id)
-    db_token.revoked = True     # revoke old token
+    if not db_token:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    if db_token.expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+
+    user = db_token.user
+
+    # 3. Revoke old token
+    db_token.revoked = True
+
+    # 4. Create new refresh token
+    new_raw_token, new_db_token = create_refresh_token(user.id)
+    print("CREATING NEW REFRESH TOKEN FOR USER:", user.id)
+    print("NEW TOKEN HASH:", new_db_token.token_hash)
+
+    db.add(new_db_token)
+    
+
+    # 5. Commit rotation
     db.commit()
 
-    return {"access_token": access_token, "token_type": "bearer", "refresh_token": new_raw_token}
+    # 6. Set new refresh token cookie
+    response.set_cookie(
+        key="refresh_token",
+        value=new_raw_token,
+        httponly=True,
+        secure=False,  # True in prod
+        samesite="lax",
+        path="/",
+    )
+
+    # 7. Issue new access token
+    access_token = create_access_token(
+        {"sub": user.email, "role": user.role}
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
+
+# Logout point
+
+def logout_user(
+        db: Session,
+        raw_refresh_token: str,
+        response: Response,
+):
+    if not raw_refresh_token:
+        return {"detail": "Logged out"}
+    
+    token_hash = hash_refresh_token(raw_refresh_token)
+
+    db_token = (
+        db.query(RefreshToken)
+        .filter(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.revoked == False,
+        )
+        .first()
+    )
+
+    if db_token:
+        db_token.revoked = True
+        db.commit()
+
+    # Delete refresh token cookie
+
+    response.delete_cookie(
+        key="refresh_token",
+        path="/",
+    )
+
+    return {"detail": "Logged out"}
